@@ -1900,12 +1900,6 @@
         fy -= n.y * centerGravity;
         n.vx = (n.vx + fx) * damping;
         n.vy = (n.vy + fy) * damping;
-        var speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy) || 0;
-        if (speed > velocityCap) {
-          var scale = velocityCap / speed;
-          n.vx *= scale;
-          n.vy *= scale;
-        }
       }
 
       edges.forEach(function(e) {
@@ -1924,6 +1918,12 @@
 
       nodes.forEach(function(n) {
         if (graphSim.dragNode === n) return;
+        var speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy);
+        if (speed > velocityCap && speed > 0) {
+          var scale = velocityCap / speed;
+          n.vx *= scale;
+          n.vy *= scale;
+        }
         n.x += n.vx;
         n.y += n.vy;
       });
