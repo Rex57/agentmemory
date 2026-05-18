@@ -1546,7 +1546,7 @@
       }, 30000);
     }
 
-    var graphSim = { nodes: [], edges: [], running: false, canvas: null, ctx: null, raf: null, panX: 0, panY: 0, zoom: 1, dragNode: null, mouseX: 0, mouseY: 0 };
+    var graphSim = { nodes: [], edges: [], running: false, canvas: null, ctx: null, raf: null, panX: 0, panY: 0, zoom: 1, dragNode: null, mouseX: 0, mouseY: 0, tick: 0 };
 
     async function loadGraph() {
       var el = document.getElementById('view-graph');
@@ -1652,6 +1652,7 @@
       if (!canvas) return;
       graphSim.canvas = canvas;
       graphSim.ctx = canvas.getContext('2d');
+      graphSim.tick = 0;
 
       function resize() {
         var r = canvas.parentElement.getBoundingClientRect();
@@ -1693,6 +1694,13 @@
 
       setupGraphInteraction(canvas);
       runSimulation();
+    }
+
+    function getGraphVelocityCap(nodeCount, tick) {
+      var start = nodeCount > 100 ? 24 : nodeCount > 50 ? 20 : 16;
+      var floor = nodeCount > 100 ? 6 : 8;
+      var decay = nodeCount > 100 ? 0.996 : 0.997;
+      return Math.max(floor, start * Math.pow(decay, tick || 0));
     }
 
     function setupGraphInteraction(canvas) {
@@ -1870,6 +1878,7 @@
       var repulsion = nodeCount > 100 ? 2000 : nodeCount > 50 ? 1200 : 800;
       var attraction = nodeCount > 100 ? 0.002 : 0.005;
       var centerGravity = nodeCount > 100 ? 0.005 : 0.01;
+      var velocityCap = getGraphVelocityCap(nodeCount, graphSim.tick);
 
       var nodeMap = {};
       nodes.forEach(function(n) { nodeMap[n.id] = n; });
@@ -1891,6 +1900,12 @@
         fy -= n.y * centerGravity;
         n.vx = (n.vx + fx) * damping;
         n.vy = (n.vy + fy) * damping;
+        var speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy) || 0;
+        if (speed > velocityCap) {
+          var scale = velocityCap / speed;
+          n.vx *= scale;
+          n.vy *= scale;
+        }
       }
 
       edges.forEach(function(e) {
@@ -1914,6 +1929,7 @@
       });
 
       renderGraph();
+      graphSim.tick += 1;
       graphSim.raf = requestAnimationFrame(runSimulation);
     }
 

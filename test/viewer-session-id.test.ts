@@ -203,3 +203,17 @@ describe("viewer session rendering", () => {
     expect(tabButtons.some((button: any) => button.classList.contains("active"))).toBe(true);
   });
 });
+
+describe("viewer graph velocity cap", () => {
+  it("starts fast and gradually slows down over time", () => {
+    const { sandbox } = loadViewerSandbox();
+
+    const start = sandbox.getGraphVelocityCap(1500, 0);
+    const mid = sandbox.getGraphVelocityCap(1500, 200);
+    const late = sandbox.getGraphVelocityCap(1500, 800);
+
+    expect(start).toBeGreaterThan(mid);
+    expect(mid).toBeGreaterThan(late);
+    expect(late).toBeGreaterThanOrEqual(6);
+  });
+});
