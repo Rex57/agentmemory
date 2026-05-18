@@ -115,6 +115,7 @@ describe("api::session::end", () => {
     ]);
     const kv = mockKV(store);
     const { sdk, calls } = mockSdk();
+    let graphExtractCompleted = false;
 
     registerApiTriggers(sdk as never, kv as never);
     registerEventTriggers(sdk as never, kv as never);
@@ -126,6 +127,8 @@ describe("api::session::end", () => {
       expect(payload).toMatchObject({
         observations: [{ id: "obs_manual_end" }],
       });
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      graphExtractCompleted = true;
       return { success: true };
     });
 
@@ -145,6 +148,7 @@ describe("api::session::end", () => {
     expect(await kv.get<Session>(KV.sessions, sessionId)).toMatchObject({
       status: "completed",
     });
+    expect(graphExtractCompleted).toBe(true);
     expect(
       calls.filter((call) => call.function_id === "mem::graph-extract"),
     ).toHaveLength(1);
