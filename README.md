@@ -1653,6 +1653,12 @@ Create `~/.agentmemory/.env`:
 #                                          # chat models reject this field with 400. Set to
 #                                          # "none" for thinking models that return reasoning
 #                                          # but no content.
+# OPENAI_EXTRA_BODY={"provider":{"order":["deepinfra"]}}
+#                                          # Optional: JSON object merged into every chat
+#                                          # request, for endpoint-specific fields such as
+#                                          # OpenRouter's `provider` routing object. model,
+#                                          # messages, max_tokens, stream and reasoning_effort
+#                                          # set by agentmemory always win.
 # OPENAI_API_KEY_FOR_LLM=false             # Optional: set to false to skip OpenAI auto-detection
 #                                          # for LLM (useful if you only want OpenAI for embeddings)
 # Opt-in Claude-subscription fallback (spawns @anthropic-ai/claude-agent-sdk);
