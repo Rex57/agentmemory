@@ -20,7 +20,10 @@ const MODEL_DIMENSIONS: Record<string, number> = {
 
 const DEFAULT_DIMENSIONS = 1536;
 
-function lookupModelDimensions(model: string): number | undefined {
+function lookupModelDimensions(rawModel: string): number | undefined {
+  // OpenRouter variant suffixes (":floor", ":nitro") pick a provider, not a
+  // different model, so the vectors keep the base model's width.
+  const model = rawModel.replace(/:[^/:]+$/, "");
   if (model in MODEL_DIMENSIONS) return MODEL_DIMENSIONS[model];
   const slash = model.indexOf("/");
   if (slash === -1) return undefined;
