@@ -6,6 +6,7 @@ const KEYS = [
   "OPENAI_BASE_URL",
   "OPENROUTER_API_KEY",
   "OPENROUTER_MODEL",
+  "OPENAI_API_KEY_FOR_LLM",
   "AGENTMEMORY_SUPPRESS_COST_WARNING",
 ];
 
@@ -55,7 +56,11 @@ describe("premium-model cost warning", () => {
   });
 
   it("keeps the OpenRouter warning text", async () => {
-    const warnings = await warningsFor({ OPENROUTER_API_KEY: "k", OPENROUTER_MODEL: "anthropic/claude-opus-5" });
+    const warnings = await warningsFor({
+      OPENROUTER_API_KEY: "k",
+      OPENROUTER_MODEL: "anthropic/claude-opus-5",
+      OPENAI_API_KEY_FOR_LLM: "false",
+    });
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("OPENROUTER_MODEL=anthropic/claude-opus-5 is in the premium tier");
   });
