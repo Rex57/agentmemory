@@ -632,7 +632,12 @@ function processHealth(report: StatusReport): string {
 
 function describeLlmUsage(usage: LlmUsageTotals): string {
   const tokens = `${usage.promptTokens.toLocaleString("en-US")} prompt + ${usage.completionTokens.toLocaleString("en-US")} completion tokens`;
-  const cost = usage.costUsd === null ? "cost not reported by the provider" : `$${usage.costUsd.toFixed(4)}`;
+  const cost =
+    usage.costUsd === null
+      ? "cost not reported by the provider"
+      : usage.costUsd > 0 && usage.costUsd < 0.0001
+        ? "<$0.0001"
+        : `$${usage.costUsd.toFixed(4)}`;
   return `${plural(usage.calls, "call")} · ${tokens} · ${cost}`;
 }
 

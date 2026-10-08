@@ -364,6 +364,11 @@ describe("renderStatusHtml", () => {
     expect(renderStatusHtml(report, "n")).toContain("2 calls · 5,000 prompt + 150 completion tokens · $0.0004");
   });
 
+  it("does not show a small nonzero cost as zero", () => {
+    const report = evaluateStatus(inputs({ llmUsage: { calls: 1, promptTokens: 50, completionTokens: 5, costUsd: 0.00001 } }));
+    expect(renderStatusHtml(report, "n")).toContain("· &lt;$0.0001");
+  });
+
   it("says when the provider reports no cost, and hides the row before any call", () => {
     const noCost = evaluateStatus(inputs({ llmUsage: { calls: 1, promptTokens: 10, completionTokens: 2, costUsd: null } }));
     expect(renderStatusHtml(noCost, "n")).toContain("cost not reported by the provider");
