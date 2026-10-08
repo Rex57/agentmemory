@@ -1,6 +1,7 @@
 import type { MemoryProvider } from "../types.js";
 import { getEnvVar } from "../config.js";
 import { fetchWithTimeout } from "./_fetch.js";
+import { recordLlmUsage } from "./usage.js";
 import {
   DEFAULT_AZURE_API_VERSION,
   buildAuthHeaders,
@@ -121,7 +122,9 @@ export class OpenAIProvider implements MemoryProvider {
         finish_reason?: string;
         message?: { content?: string; reasoning?: string; reasoning_content?: string };
       }>;
+      usage?: unknown;
     };
+    recordLlmUsage(data.usage);
     const choice = data.choices?.[0];
     const message = choice?.message;
     const content = message?.content;
