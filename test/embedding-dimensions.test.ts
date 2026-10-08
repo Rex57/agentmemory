@@ -42,6 +42,8 @@ describe("resolveDimensions", () => {
     expect(resolveDimensions("openai/text-embedding-3-large:nitro", undefined, ENV)).toBe(3072);
     expect(resolveDimensions("text-embedding-3-large:floor", undefined, ENV)).toBe(3072);
     expect(resolveDimensions("acme/unknown-embed:floor", undefined, ENV)).toBe(1536);
+    expect(resolveDimensions("acme/constructor:floor", undefined, ENV)).toBe(1536);
+    expect(resolveDimensions("toString", undefined, ENV)).toBe(1536);
     expect(resolveDimensions("openai/text-embedding-3-large:floor", "256", ENV)).toBe(256);
   });
 
