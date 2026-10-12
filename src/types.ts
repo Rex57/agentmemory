@@ -103,6 +103,7 @@ export interface CompressedObservation {
   agentId?: string;
   origin?: Origin;
   captureKey?: string;
+  compressedAt?: string;
 }
 
 export type ObservationType =
@@ -157,6 +158,7 @@ export interface SessionSummary {
   filesModified: string[];
   concepts: string[];
   observationCount: number;
+  coveredThrough?: string;
 }
 
 export type HookType =
@@ -218,6 +220,7 @@ export interface SearchResult {
   observation: CompressedObservation;
   score: number;
   sessionId: string;
+  layer?: "memory" | "observation" | "lesson" | "insight";
 }
 
 export interface ContextBlock {
@@ -302,6 +305,7 @@ export interface MemoryRelation {
 
 export interface HybridSearchResult {
   observation: CompressedObservation;
+  layer?: "memory" | "observation" | "lesson" | "insight";
   bm25Score: number;
   vectorScore: number;
   graphScore: number;
@@ -317,6 +321,7 @@ export interface CompactSearchResult {
   type: ObservationType;
   score: number;
   timestamp: string;
+  layer?: "memory" | "observation" | "lesson" | "insight";
 }
 
 export interface CompactLessonResult {

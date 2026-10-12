@@ -1,4 +1,5 @@
 import type { CompressedObservation } from "../types.js";
+import { getSearchResultLayer, isSearchResultLayer, matchesSearchLayer, type SearchLayer, type SearchResultLayer } from "./search-layer.js";
 import { stem } from "./stemmer.js";
 import { getSynonyms } from "./synonyms.js";
 import { segmentCjk, hasCjk } from "./cjk-segmenter.js";
@@ -7,6 +8,7 @@ interface IndexEntry {
   obsId: string;
   sessionId: string;
   termCount: number;
+  layer: SearchResultLayer;
 }
 
 export class SearchIndex {
@@ -19,7 +21,7 @@ export class SearchIndex {
   private readonly k1 = 1.2;
   private readonly b = 0.75;
 
-  add(obs: CompressedObservation): void {
+  add(obs: CompressedObservation, layer: SearchResultLayer = "observation"): void {
     if (this.entries.has(obs.id)) this.remove(obs.id);
     const terms = this.extractTerms(obs);
     const termFreq = new Map<string, number>();
@@ -34,6 +36,7 @@ export class SearchIndex {
       obsId: obs.id,
       sessionId: obs.sessionId,
       termCount,
+      layer,
     });
     this.docTermCounts.set(obs.id, termFreq);
     this.totalDocLength += termCount;
@@ -56,10 +59,14 @@ export class SearchIndex {
     return this.entries.get(id)?.sessionId;
   }
 
+  layerOf(id: string): SearchResultLayer | undefined {
+    return this.entries.get(id)?.layer;
+  }
+
   observationCountsBySession(): Map<string, number> {
     const counts = new Map<string, number>();
     for (const entry of this.entries.values()) {
-      if (entry.obsId.startsWith("mem_")) continue;
+      if (entry.layer !== "observation") continue;
       counts.set(entry.sessionId, (counts.get(entry.sessionId) ?? 0) + 1);
     }
     return counts;
@@ -69,8 +76,8 @@ export class SearchIndex {
     let memories = 0;
     let lessons = 0;
     for (const entry of this.entries.values()) {
-      if (entry.obsId.startsWith("mem_")) memories++;
-      else if (entry.sessionId === "lesson") lessons++;
+      if (entry.layer === "memory") memories++;
+      else if (entry.layer === "lesson") lessons++;
     }
     return { memories, lessons };
   }
@@ -101,6 +108,7 @@ export class SearchIndex {
   search(
     query: string,
     limit = 20,
+    targetLayer: SearchLayer = "all",
   ): Array<{ obsId: string; sessionId: string; score: number }> {
     const rawTerms = this.tokenize(query.toLowerCase());
     if (rawTerms.length === 0) return [];
@@ -135,6 +143,7 @@ export class SearchIndex {
 
         for (const obsId of matchingDocs) {
           const entry = this.entries.get(obsId)!;
+          if (!matchesSearchLayer(obsId, entry.sessionId, targetLayer, entry.layer)) continue;
           const docTerms = this.docTermCounts.get(obsId);
           const tf = docTerms?.get(term) || 0;
           const docLen = entry.termCount;
@@ -148,6 +157,7 @@ export class SearchIndex {
         }
       }
 
+      const prefixScores = new Map<string, number>();
       const startIdx = this.lowerBound(sorted, term);
       for (let si = startIdx; si < sorted.length; si++) {
         const indexTerm = sorted[si];
@@ -159,18 +169,21 @@ export class SearchIndex {
         const prefixIdf =
           Math.log((N - prefixDf + 0.5) / (prefixDf + 0.5) + 1) * 0.5;
         for (const obsId of obsIds) {
+          if (matchingDocs?.has(obsId)) continue;
           const entry = this.entries.get(obsId)!;
+          if (!matchesSearchLayer(obsId, entry.sessionId, targetLayer, entry.layer)) continue;
           const docTerms = this.docTermCounts.get(obsId);
           const tf = docTerms?.get(indexTerm) || 0;
           const docLen = entry.termCount;
           const numerator = tf * (this.k1 + 1);
           const denominator =
             tf + this.k1 * (1 - this.b + this.b * (docLen / avgDocLen));
-          scores.set(
-            obsId,
-            (scores.get(obsId) || 0) + prefixIdf * (numerator / denominator) * weight,
-          );
+          const score = prefixIdf * (numerator / denominator) * weight;
+          prefixScores.set(obsId, Math.max(prefixScores.get(obsId) ?? 0, score));
         }
+      }
+      for (const [obsId, score] of prefixScores) {
+        scores.set(obsId, (scores.get(obsId) ?? 0) + score);
       }
     }
 
@@ -225,7 +238,7 @@ export class SearchIndex {
         [id, Array.from(counts.entries())] as [string, [string, number][]],
     );
     return JSON.stringify({
-      v: 2,
+      v: 3,
       entries,
       inverted,
       docTerms,
@@ -239,7 +252,10 @@ export class SearchIndex {
       const data = JSON.parse(json);
       if (!data?.entries || !data?.inverted || !data?.docTerms) return idx;
       for (const [key, val] of data.entries) {
-        idx.entries.set(key, val);
+        idx.entries.set(key, {
+          ...val,
+          layer: isSearchResultLayer(val.layer) ? val.layer : getSearchResultLayer(key, val.sessionId),
+        });
       }
       for (const [term, ids] of data.inverted) {
         idx.invertedIndex.set(term, new Set(ids));
