@@ -2896,7 +2896,7 @@ async function seedDemoSession(
     }
   }
 
-  await postJsonStrict(`${base}/agentmemory/session/end`, { sessionId: session.id });
+  await postJsonStrict(`${base}/agentmemory/session/end`, { sessionId: session.id, final: true });
   return stored;
 }
 

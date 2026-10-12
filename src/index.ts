@@ -20,6 +20,7 @@ import {
   isSessionSweepEnabled,
   isGraphCompactOnBootEnabled,
   getSessionSweepStaleHours,
+  getFinalizeIdleMs,
 } from "./config.js";
 import {
   createProvider,
@@ -29,6 +30,7 @@ import {
 } from "./providers/index.js";
 import { StateKV } from "./state/kv.js";
 import { VectorIndex } from "./state/vector-index.js";
+import type { SearchLayer } from "./state/search-layer.js";
 import { HybridSearch } from "./state/hybrid-search.js";
 import { IndexPersistence } from "./state/index-persistence.js";
 import { SHUTDOWN_FLUSH_TIMEOUT_MS, SHUTDOWN_HARD_EXIT_MS, settleWithin } from "./shutdown.js";
@@ -71,6 +73,7 @@ import { registerTimelineFunction } from "./functions/timeline.js";
 import { registerSmartSearchFunction } from "./functions/smart-search.js";
 import { registerRecentSearchesSweepFunction } from "./functions/recent-searches-sweep.js";
 import { registerSessionSweepFunction } from "./functions/session-sweep.js";
+import { FINALIZE_TICK_MS, registerSessionFinalizeFunction } from "./functions/session-finalize.js";
 import { registerProfileFunction } from "./functions/profile.js";
 import { registerAutoForgetFunction } from "./functions/auto-forget.js";
 import { registerExportImportFunction } from "./functions/export-import.js";
@@ -299,6 +302,7 @@ async function main() {
   registerRememberFunction(sdk, kv);
   registerEvictFunction(sdk, kv);
   registerSessionSweepFunction(sdk, kv);
+  registerSessionFinalizeFunction(sdk, kv);
 
   registerRelationsFunction(sdk, kv);
   registerTimelineFunction(sdk, kv);
@@ -429,8 +433,8 @@ async function main() {
     graphWeight,
   );
 
-  const hybridRanker = (query: string, limit: number) =>
-    hybridSearch.search(query, limit);
+  const hybridRanker = (query: string, limit: number, targetLayer?: SearchLayer) =>
+    hybridSearch.search(query, limit, targetLayer);
   registerSmartSearchFunction(sdk, kv, hybridRanker);
   setHybridRanker(hybridRanker);
   registerRecentSearchesSweepFunction(sdk, kv);
@@ -718,6 +722,19 @@ async function main() {
     }, 60 * 60 * 1000);
     sessionSweepTimer.unref();
     bootLog(`Session sweep: enabled (hourly, stale after ${getSessionSweepStaleHours()}h)`);
+  }
+
+  const finalizeIdleMs = getFinalizeIdleMs();
+  if (finalizeIdleMs > 0) {
+    const sessionFinalizeTimer = setInterval(async () => {
+      try {
+        await sdk.trigger({ function_id: "mem::session-finalize", payload: {} });
+      } catch (err) {
+        bootLog(`Session finalize failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }, FINALIZE_TICK_MS);
+    sessionFinalizeTimer.unref();
+    bootLog(`Session finalize: idle sessions complete after ${Math.round(finalizeIdleMs / 1000)}s`);
   }
 
   if (isConsolidationEnabled()) {
