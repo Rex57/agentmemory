@@ -2662,7 +2662,7 @@ async function passiveServerChecks(): Promise<DoctorCheck[]> {
   ]);
 
   const hasLlm = flags?.provider === "llm";
-  const hasEmbed = flags?.embeddingProvider === "embeddings";
+  const hasEmbed = embeddingStatusLabel(flags?.embeddingProvider) !== null;
   const graphNodeCount = graph?.available === false ? null : graph?.totalNodes ?? graph?.nodes ?? graph?.nodeCount ?? null;
   const graphHas = typeof graphNodeCount === "number" && graphNodeCount > 0;
 
