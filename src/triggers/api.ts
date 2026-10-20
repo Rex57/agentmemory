@@ -9,6 +9,7 @@ import { KV } from "../state/schema.js";
 import { isSearchLayer, type SearchLayer } from "../state/search-layer.js";
 import { checkPayloadFrameSize } from "../state/frame-guard.js";
 import { StateKV } from "../state/kv.js";
+import { pinGraphState } from "../state/graph-generation.js";
 import { addSessionToProjectIndex } from "../state/session-index.js";
 import { getLatestHealth } from "../health/monitor.js";
 import type { MetricsStore } from "../eval/metrics-store.js";
@@ -47,12 +48,17 @@ import { MAX_FILES_UPPER_BOUND } from "../functions/replay.js";
 import { describeGraphNode } from "../functions/graph-node.js";
 import { COMPACT_SCOPES, type GraphCompactScope } from "../functions/graph.js";
 import { getGraphCompactBootStatus } from "../functions/graph-compact-boot.js";
+import { getGraphIndexMigrationStatus } from "../state/graph-index-migration.js";
+import { GraphIndexError } from "../state/graph-retrieval-index.js";
+import { registerGraphIndexApi } from "./graph-index-api.js";
 import { LESSON_SOURCE_IDS_MAX, normalizeLessonSourceIds } from "../functions/lessons.js";
 import { logger } from "../logger.js";
 import { isValidEventId } from "../capture/event-id.js";
 import { getCaptureController, type CaptureResult } from "../functions/capture.js";
 import { withoutObservationSource } from "../functions/observation-source.js";
 import { clearSessionFinalize, scheduleSessionFinalize } from "../functions/session-finalize.js";
+import { requestSummaryRefresh } from "../functions/summary-state.js";
+import { registerCompressionApi } from "./compression.js";
 import {
   getFinalizeIdleMs,
   isGraphExtractionEnabled,
@@ -63,6 +69,7 @@ import {
   isAutoCompressEnabled,
   isContextInjectionEnabled,
   detectEmbeddingProvider,
+  describeLlmRoute,
   detectLlmProviderKind,
   getAgentId,
   isAgentScopeIsolated,
@@ -383,7 +390,7 @@ export function createStatusReporter(sdk: IIIClient, kv: StateKV, deps: StatusRe
     const cached = scan.last && options.scanMaxAgeMs !== undefined && Date.now() - scan.last.at < options.scanMaxAgeMs
       ? scan.last.value
       : null;
-    const [health, functionMetrics, graph, unindexed, auditMigrationState, stateStore, capture] = await Promise.all([
+    const [health, functionMetrics, graph, unindexed, auditMigrationState, stateStore, capture, graphIndex] = await Promise.all([
       options.health !== undefined ? Promise.resolve(options.health) : valueWithin(getLatestHealth(kv), STATUS_CHECK_TIMEOUT_MS),
       deps.metricsStore ? valueWithin(deps.metricsStore.getAll(), STATUS_CHECK_TIMEOUT_MS) : Promise.resolve([]),
       valueWithin(
@@ -397,6 +404,7 @@ export function createStatusReporter(sdk: IIIClient, kv: StateKV, deps: StatusRe
       ),
       probeStateStore(kv),
       valueWithin(getCaptureController()?.status() ?? Promise.resolve(null), STATUS_CHECK_TIMEOUT_MS),
+      valueWithin(getGraphIndexMigrationStatus(kv), STATUS_CHECK_TIMEOUT_MS),
     ]);
     const observationsIndexed = [...idx.observationCountsBySession().values()].reduce((a, n) => a + n, 0);
     const documentKinds = idx.documentKindCounts();
@@ -428,6 +436,7 @@ export function createStatusReporter(sdk: IIIClient, kv: StateKV, deps: StatusRe
           }
         : null,
       circuitBreaker: circuit,
+      llmRoute: describeLlmRoute(config.provider),
       functionMetrics: functionMetrics ?? [],
       provider: detectLlmProviderKind(),
       embeddingProvider: describeEmbeddingProvider(),
@@ -446,6 +455,7 @@ export function createStatusReporter(sdk: IIIClient, kv: StateKV, deps: StatusRe
         vectorBackfillState: getVectorBackfillState(),
       },
       graph,
+      graphIndex,
       graphCompaction: getGraphCompactBootStatus(),
       graphExtractionEnabled: isGraphExtractionEnabled(),
       auditLegacy: auditMigrationState
@@ -517,6 +527,10 @@ export function registerApiTriggers(
   metricsStore?: MetricsStore,
   provider?: ResilientProvider | { circuitState?: unknown },
 ): void {
+  registerGraphIndexApi(sdk, secret, checkAuth);
+  sdk.registerTrigger({ type: "http", function_id: "api::graph-index-status", config: { api_path: "/agentmemory/graph/index", http_method: "GET" } });
+  sdk.registerTrigger({ type: "http", function_id: "api::graph-index-migrate", config: { api_path: "/agentmemory/graph/index/migrate", http_method: "POST" } });
+  sdk.registerTrigger({ type: "http", function_id: "api::graph-index-resume", config: { api_path: "/agentmemory/graph/index/resume", http_method: "POST" } });
   sdk.registerFunction(
     "middleware::api-auth",
     async (input: {
@@ -926,6 +940,24 @@ export function registerApiTriggers(
     },
   });
 
+  registerCompressionApi(sdk, secret);
+  sdk.registerTrigger({
+    type: "http",
+    function_id: "api::compression-status",
+    config: {
+      http_method: "GET",
+      api_path: "/agentmemory/compression",
+    },
+  });
+  sdk.registerTrigger({
+    type: "http",
+    function_id: "api::compression-retry",
+    config: {
+      http_method: "POST",
+      api_path: "/agentmemory/compression/retry",
+    },
+  });
+
   sdk.registerFunction("api::compress-file", 
     async (req: HttpRequest<{ filePath: string }>): Promise<Response> => {
       const authErr = checkAuth(req, secret);
@@ -1163,6 +1195,7 @@ export function registerApiTriggers(
         if (!session || session.id !== sessionId) return "not_found" as const;
         if (session.status === "completed") return "already_completed" as const;
 
+        await requestSummaryRefresh(kv, sessionId);
         await kv.update(KV.sessions, sessionId, [
           { type: "set", path: "endedAt", value: new Date().toISOString() },
           { type: "set", path: "status", value: "completed" },
@@ -2166,9 +2199,21 @@ export function registerApiTriggers(
       if (authErr) return authErr;
       const id = asNonEmptyString(req.query_params?.["id"]);
       if (!id) return { status_code: 400, body: { error: "id required" } };
-      const detail = await describeGraphNode(kv, id);
-      if (!detail) return { status_code: 404, body: { error: "graph node not found", id } };
-      return { status_code: 200, body: detail };
+      const cursor = req.query_params?.["cursor"];
+      const limit = parseOptionalPositiveInt(req.query_params?.["limit"]);
+      if (cursor !== undefined && typeof cursor !== "string") return { status_code: 400, body: { error: "cursor must be a string" } };
+      if (limit === null || (limit !== undefined && limit > 200)) return { status_code: 400, body: { error: "limit must be an integer between 1 and 200" } };
+      try {
+        const detail = await describeGraphNode(kv, id, { cursor: cursor || undefined, limit });
+        if (!detail) return { status_code: 404, body: { error: "graph node not found", id } };
+        if ("error" in detail) return { status_code: 503, body: detail };
+        return { status_code: 200, body: detail };
+      } catch (error) {
+        if (error instanceof GraphIndexError && error.message === "Invalid or expired graph posting cursor") {
+          return { status_code: 400, body: { error: "Invalid or expired graph cursor" } };
+        }
+        return { status_code: 503, body: { error: "Graph node index is unavailable" } };
+      }
     },
   );
   sdk.registerTrigger({
@@ -3574,11 +3619,12 @@ export function registerApiTriggers(
         actions: df(actions, "updatedAt"),
       };
       if (!project) {
+        const graphState = await pinGraphState(kv);
         const semantic = await kv.list<import("../types.js").SemanticMemory>(KV.semantic);
         const procedural = await kv.list<import("../types.js").ProceduralMemory>(KV.procedural);
         const relations = await kv.list<import("../types.js").MemoryRelation>(KV.relations);
-        const graphNodes = await kv.list<import("../types.js").GraphNode>(KV.graphNodes);
-        const graphEdges = await kv.list<import("../types.js").GraphEdge>(KV.graphEdges);
+        const graphNodes = await graphState.list<import("../types.js").GraphNode>(KV.graphNodes);
+        const graphEdges = await graphState.list<import("../types.js").GraphEdge>(KV.graphEdges);
         body.semantic = df(semantic, "updatedAt");
         body.procedural = df(procedural, "updatedAt");
         body.relations = df(relations, "createdAt");
