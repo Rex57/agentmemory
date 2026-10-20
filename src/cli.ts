@@ -657,6 +657,7 @@ function engineStatePath(): string {
 type NativeEngineState = {
   kind: "native";
   configPath: string;
+  cwd?: string;
   attached?: boolean;
   binPath?: string;
   restPort?: number;
@@ -831,7 +832,7 @@ function configuredEngineMayStartWorker(): boolean {
   if (state?.kind !== "native" || state.attached) return false;
   try {
     const raw = readFileSync(state.configPath, "utf-8");
-    return configStartsAgentmemoryWorker(raw, join(__dirname, "index.mjs"));
+    return configStartsAgentmemoryWorker(raw, join(__dirname, "index.mjs"), state.cwd);
   } catch {
     return false;
   }
@@ -1718,6 +1719,7 @@ function startIiiBin(iiiBin: string, configPath: string): boolean {
   writeEngineState({
     kind: "native",
     configPath: launch.configPath,
+    cwd: launch.cwd,
     binPath: iiiBin,
   });
   spawnEngineBackground(
